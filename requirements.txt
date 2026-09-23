@@ -1,0 +1,30 @@
+# Core HTTP + parsing (HTML path; currently dormant due to WAF on eur-lex)
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+trafilatura>=1.12
+
+# HuggingFace corpus loader (primary dry-run path)
+datasets>=2.19
+
+# Fuzzy offset recovery (Phase 1: char-level traceback for source_quote)
+rapidfuzz>=3.9
+
+# Structured data + JSON Schema
+pydantic>=2.7
+
+# CLI niceties
+typer>=0.12
+rich>=13.7
+
+# Phase-2: alignment + clustering
+sentence-transformers>=2.7   # all-MiniLM-L6-v2 — ~80 MB, fits on RTX 3060M easily
+scipy>=1.11                  # linear_sum_assignment (Hungarian)
+numpy>=1.26
+scikit-learn>=1.4            # cosine_similarity utility, AgglomerativeClustering
+
+# Phase-3: UI backend
+flask>=3.0
+
+# Phase-3: KG backend
+neo4j>=5.0                   # Bolt driver for the conflict-aware knowledge graph

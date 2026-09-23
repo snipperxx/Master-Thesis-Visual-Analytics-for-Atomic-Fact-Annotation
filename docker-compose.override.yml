@@ -1,0 +1,12 @@
+# Dev override — Docker Compose AUTO-loads this on top of docker-compose.yml
+# whenever you run `docker compose up` (you don't name it explicitly).
+#
+# It adds --debug so Flask's reloader restarts the app whenever a .py file
+# changes. Your repo is already bind-mounted (.:/app in docker-compose.yml),
+# so edits on your Windows host are seen inside the container and trigger it.
+#
+# Production / no auto-reload (ignores this file):
+#     docker compose -f docker-compose.yml up
+services:
+  app:
+    command: ["python", "-m", "ui.app", "--host", "0.0.0.0", "--port", "5000", "--debug"]

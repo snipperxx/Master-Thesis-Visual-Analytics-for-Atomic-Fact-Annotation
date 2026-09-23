@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Atomic Fact VA Prototype</title>
+  <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+  <!-- Layout extensions: fcose ≈ FMMM-style multilevel, dagre ≈ Sugiyama hierarchical. -->
+  <script src="https://unpkg.com/layout-base/layout-base.js"></script>
+  <script src="https://unpkg.com/cose-base/cose-base.js"></script>
+  <script src="https://unpkg.com/cytoscape-fcose/cytoscape-fcose.js"></script>
+  <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+  <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+  <header id="topbar">
+    <h1>Atomic Fact VA</h1>
+    <div class="controls">
+      <label>Source
+        <select id="source-filter" title="Filter the document list by corpus">
+          <option value="all" selected>all</option>
+          <option value="webnlg">WebNLG</option>
+          <option value="eurlex">EUR-Lex</option>
+          <option value="user">Uploaded</option>
+        </select>
+      </label>
+      <label>Doc
+        <select id="doc-select"></select>
+        <button id="upload-btn" title="Upload arbitrary text">+ Text</button>
+        <button id="delete-doc-btn" title="Delete this doc and every per-doc artifact" class="danger">Delete</button>
+        <select id="variant-select" title="Guideline version to view. Applies to the whole corpus and survives switching documents: the annotations and conflicts you see below are this version's.">
+          <option value="">v1 (baseline)</option>
+        </select>
+        <span id="run-badge" class="run-badge hidden"></span>
+        <span id="split-badge" class="run-badge hidden"></span>
+      </label>
+      <label>Annotators <span id="annotator-chips" class="annot-dds"></span></label>
+      <label>Conflict
+        <select id="conflict-filter">
+          <option value="">all</option>
+          <option value="contradiction">contradiction</option>
+          <option value="granularity">granularity</option>
+          <option value="redundancy">redundancy</option>
+          <option value="unlabeled">unlabeled</option>
+        </select>
+      </label>
+      <label class="color-mode-label">Color by
+        <select id="color-mode-select">
+          <option value="fact">fact</option>
+          <option value="annotator" selected>annotator</option>
+          <option value="conflict">conflict</option>
+          <option value="none">none</option>
+        </select>
+      </label>
+      <label>Search <input type="text" id="search-box" placeholder="subject/object…" size="14"></label>
+      <span id="label-counts"></span>
+      <button id="compare-btn" title="v1 vs v2 distribution shift">Compare v1↔v2</button>
+      <button id="gold-compare-btn" class="hidden" title="Score extracted facts against this doc's gold-standard triples (WebNLG / Re-DocRED)">⚖ Gold compare</button>
+      <button id="jobs-toggle" title="Show / hide live jobs panel">Jobs ▾</button>
+    </div>
+    <div id="coverage-row"></div>
+    <div id="live-jobs" class="hidden"></div>
+  </header>
+
+  <div id="topbar-splitter" title="Drag to resize the top bar · drag up / double-click to collapse"></div>
+
+  <main id="layout">
+
+    <section id="pane-text" class="pane" data-pane-key="text">
+      <h2>
+        Document text <span class="hint">(select text to re-extract a span)</span>
+        <span class="pane-tools">
+          <button class="tool-btn" id="text-font-dec" title="Decrease font size">A−</button>
+          <button class="tool-btn" id="text-font-inc" title="Increase font size">A+</button>
+          <button class="tool-btn pane-max" data-pane="text" title="Maximize / restore this pane">⛶</button>
+          <button class="tool-btn pane-hide" data-pane="text" title="Collapse this pane">—</button>
+        </span>
+      </h2>
+      <div id="doc-title"></div>
+      <div id="doc-body"></div>
+      <!-- Floating "re-extract this span" menu, shown on text selection -->
+      <div id="span-menu" class="hidden">
+        <label>model
+          <select id="span-model"></select>
+        </label>
+        <label>guideline
+          <select id="span-guideline"></select>
+        </label>
+        <button id="span-reextract">Re-extract span</button>
+        <button id="span-cancel" class="ghost">×</button>
+      </div>
+    </section>
+
+    <div class="splitter" data-splitter="0" title="Drag to resize"></div>
+
+    <section id="pane-graph" class="pane" data-pane-key="graph">
+      <h2>
+        <span id="center-tabs">
+          <button class="ctab active" data-view="graph">Graph</button>
+          <button class="ctab" data-view="multiples" title="Small-multiple KGs, one per annotator (shared layout)">Multiples</button>
+          <button class="ctab" data-view="heatmap" title="Fact-by-fact semantic similarity heatmap for an annotator pair">Heatmap</button>
+          <button class="ctab" data-view="stats" title="Triple-count histogram + inter-annotator agreement">Stats</button>
+          <button class="ctab" data-view="groups" title="The group layer: one fact plus the partners it matched — the only view where a one-to-many granularity split is visible">Groups</button>
+        </span>
+        <span class="pane-tools">
+          <button class="tool-btn" id="cy-rebuild-btn" title="Rebuild the KG for this doc (Phase-2)">Build KG</button>
+          <button class="tool-btn" id="cy-fit-btn" title="Fit graph to view">Fit</button>
+          <button class="tool-btn" id="cy-settings-btn" title="Adjust node / label size">⚙ Settings</button>
+          <button class="tool-btn pane-max" data-pane="graph" title="Maximize / restore this pane">⛶</button>
+          <button class="tool-btn pane-hide" data-pane="graph" title="Collapse this pane">—</button>
+        </span>
+      </h2>
+      <div id="graph-settings" class="hidden">
+        <label>Layout
+          <select id="layout-select">
+            <option value="concentric">concentric</option>
+            <option value="cose">cose</option>
+            <option value="fcose" selected>fcose (FMMM)</option>
+            <option value="dagre">dagre (Sugiyama)</option>
+            <option value="breadthfirst">breadthfirst</option>
+            <option value="grid">grid</option>
+          </select>
+        </label>
+        <label>Node size <input type="range" id="cy-node-size" min="20" max="120" step="2" value="60">
+          <span id="cy-node-size-v">60</span></label>
+        <label>Label size <input type="range" id="cy-label-size" min="8" max="22" step="1" value="13">
+          <span id="cy-label-size-v">13</span></label>
+        <label>Edge label size <input type="range" id="cy-edge-label-size" min="6" max="18" step="1" value="11">
+          <span id="cy-edge-label-size-v">11</span></label>
+        <label>Edge width <input type="range" id="cy-edge-width" min="1" max="8" step="0.5" value="3">
+          <span id="cy-edge-width-v">3</span></label>
+        <label>Edge length <input type="range" id="cy-edge-length" min="40" max="400" step="10" value="160">
+          <span id="cy-edge-length-v">160</span></label>
+        <label><input type="checkbox" id="cy-reify" checked
+          title="Reify each fact into a statement node (entity → statement → entity) so condition / ordering / logic become visible graph structure"> Reify (statement nodes)</label>
+        <label>Entity merge
+          <input type="range" id="merge-threshold" min="0.50" max="0.99" step="0.01" value="0.78">
+          <span id="merge-threshold-value">0.78</span>
+        </label>
+        <label><input type="checkbox" id="cy-core-entities" checked
+          title="Cluster and merge entities by their core noun phrase (strip dates/determiners/long modifier tails). Full decontextualized forms stay in the node's surface list."> Core entities</label>
+        <label><input type="checkbox" id="cy-hide-islands" checked
+          title="Hide connected components with ≤2 nodes (single-fact fragments)"> Hide leaf islands</label>
+        <label><input type="checkbox" id="cy-show-edge-labels" checked> Show edge labels</label>
+        <label><input type="checkbox" id="cy-show-node-labels" checked> Show node labels</label>
+        <button id="cy-settings-reset" class="tool-btn">Reset</button>
+      </div>
+      <div id="cy"></div>
+      <div id="cy-multiples" class="hidden"></div>
+      <div id="heatmap-wrap" class="hidden"></div>
+      <div id="stats-wrap" class="hidden"></div>
+      <div id="groups-wrap" class="hidden"></div>
+      <div id="cy-legend">
+        <span id="cy-segment-chip" class="hidden" title="The graph is showing one segment. Click to show the whole document again."><span></span><b>&#10005;</b></span>
+        <span id="cy-hover-info"></span>
+        <span class="dot redundancy" title="Same claim, near-duplicate phrasing. The only label Layer-1 settles on its own: cos >= 0.95 AND subject+object trigram Jaccard >= 0.75, so no LLM call is spent on it."></span> redundancy
+        <span class="dot granularity" title="The annotators cut the same material into a different number of facts — one-to-many. This is the category the thesis is about."></span> granularity
+        <span class="dot contradiction" title="The facts cannot both be true of the source. Layer-2's verdict; Layer-1 only ever hints at it (numeric or polarity divergence) and escalates."></span> contradiction
+        <span class="dot escalate" title="Layer-1 matched the pair but could not decide, so it handed it to the Layer-2 arbitrator — and Layer-2 has not returned a label for it. Either Phase-2 has not run Layer-2 yet, or the call failed / could not be parsed: the code leaves 'escalate' standing rather than guessing, so a miss stays visible. In the dev run of record this is 0 groups and 2 pairs out of ~19.5k."></span> escalate (L2 pending)
+        <span class="dot unlabeled" title="An orphan: a fact that matched nothing on the other side (status unmatched_a / unmatched_b). Layer-1 deliberately does not guess at these — not the same thing as 'escalate', which is a matched pair awaiting arbitration."></span> unlabeled
+        <span class="hint reified-legend">▭ statement · <span style="color:#7c3aed">⇢ if</span> · <span style="color:#0d9488">⇢ then</span></span>
+        <span class="hint">J/K cycle facts · double-click node = focus · double-click background = reset</span>
+      </div>
+    </section>
+
+    <div class="splitter" data-splitter="1" title="Drag to resize"></div>
+
+    <section id="pane-facts" class="pane" data-pane-key="facts">
+      <h2>
+        Atomic facts
+        <span class="pane-tools">
+          <label class="sort-label">Sort
+            <select id="facts-sort">
+              <option value="segment" selected title="One block per segment: the source clause on top, one column per annotator — the comparison the baseline reader makes readable, with the conflict labels this interface adds">by segment (side by side)</option>
+              <option value="model">by model</option>
+              <option value="paragraph">by paragraph (stacked)</option>
+            </select>
+          </label>
+          <button class="tool-btn" id="facts-extract-btn" title="Run Phase-1 extraction for this doc">Extract here</button>
+          <button class="tool-btn pane-max" data-pane="facts" title="Maximize / restore this pane">⛶</button>
+          <button class="tool-btn pane-hide" data-pane="facts" title="Collapse this pane">—</button>
+        </span>
+      </h2>
+      <div id="facts-controls">
+        <span id="facts-count"></span>
+        <div>
+          <button id="export-json" title="JSON">JSON</button>
+          <button id="export-csv" title="CSV">CSV</button>
+        </div>
+      </div>
+      <div id="facts-empty-cta" class="hidden">
+        <strong>No facts on disk for this doc.</strong>
+        <p class="hint">Click <b>Extract here</b> above to run Phase-1 (needs Ollama). The table will fill live as facts get extracted.</p>
+      </div>
+      <div id="facts-table-wrap">
+        <div id="facts-table" class="facts-prose"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Horizontal splitter between main pane and bottom drawer -->
+  <div class="hsplitter" data-hsplitter="0" title="Drag to resize drawer height"></div>
+
+  <!-- Pair-detail modal -->
+  <div id="modal-overlay" class="hidden">
+    <div id="modal">
+      <header>
+        <span id="modal-title">Pair details</span>
+        <button id="modal-close">×</button>
+      </header>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Compare v1↔v2 modal -->
+  <div id="compare-overlay" class="hidden">
+    <div id="compare-modal">
+      <header>
+        <span>Distribution shift: v1 vs v2</span>
+        <button id="compare-close">×</button>
+      </header>
+      <div id="compare-body"></div>
+    </div>
+  </div>
+
+  <!-- Gold-standard compare modal (docs with gold_triples: WebNLG / Re-DocRED) -->
+  <div id="gold-overlay" class="hidden">
+    <div id="gold-modal">
+      <header>
+        <span>Gold-standard comparison (strict + soft matching)</span>
+        <button id="gold-close">×</button>
+      </header>
+      <div id="gold-body"></div>
+    </div>
+  </div>
+
+  <!-- Upload text modal -->
+  <div id="upload-overlay" class="hidden">
+    <div id="upload-modal">
+      <header>
+        <span>Upload text</span>
+        <button id="upload-close">×</button>
+      </header>
+      <div class="modal-body">
+        <label>Title <input type="text" id="upload-title" size="50" placeholder="Optional title"></label>
+        <label>Text
+          <textarea id="upload-textarea" rows="14" placeholder="Paste plain text. Empty lines split paragraphs."></textarea>
+        </label>
+        <div class="row">
+          <label>Split mode
+            <select id="upload-split">
+              <option value="paragraph" selected>paragraph (blank line)</option>
+              <option value="sentence">sentence</option>
+            </select>
+          </label>
+          <label><input type="checkbox" id="upload-extract" checked> Also extract facts after upload</label>
+          <label>Model <select id="upload-model"></select></label>
+          <label>Guideline <select id="upload-guideline"></select></label>
+        </div>
+        <div class="row">
+          <button id="upload-submit">Upload</button>
+          <span id="upload-status"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer id="bottombar">
+    <nav id="drawer-tabs">
+      <button class="tab active" data-tab="background-runs">Runs</button>
+      <button class="tab" data-tab="annotation" title="The schema frame: the I/O contract embedded in every extraction prompt. Held fixed across all conditions — only the guideline varies.">Schema frame</button>
+      <button class="tab" data-tab="arbitrate-manager">Conflict detect</button>
+      <button class="tab" data-tab="experiment">Experiment</button>
+      <button class="tab" data-tab="review">Review</button>
+      <button class="tab" data-tab="run-matrix">Run matrix</button>
+      <button class="tab" data-tab="neo4j">Neo4j</button>
+      <button class="tab" data-tab="change-log" title="The guideline draft and its change log, side by side — the same surface the control console gives g_v2′">Guideline &amp; log</button>
+    </nav>
+
+    <div class="tab-pane active" data-tab="background-runs">
+      <p class="hint">Kick off Phase-1 (LLM extraction, requires Ollama running locally) or
+        Phase-2 (alignment + conflict detection — works without Ollama if "skip Layer-2" is on).
+        Progress shows in the Live jobs panel right under the top bar.</p>
+      <div class="bg-runs">
+        <fieldset>
+          <legend>Phase-1 — extract facts</legend>
+          <div class="model-row"><span class="ml">Models</span>
+            <span id="p1-models-dd" class="msd-host"></span>
+            <input type="hidden" id="p1-models" value="{{ record.annotators | join(',') }}">
+          </div>
+          <label>Annotation guideline <select id="p1-guideline"></select></label>
+          <label>Doc subset <input type="text" id="p1-doc-subset" placeholder="leave blank = all parsed docs" size="40"></label>
+          <div class="row">
+            <button id="run-phase1-btn">Run Phase-1</button>
+            <button id="run-phase1-doc-btn" title="Run Phase-1 on ONLY the document open above, using the model(s) + guideline selected here">Run on current doc</button>
+            <span id="p1-status"></span>
+          </div>
+          <p class="ollama-hint">Defaults to the frozen annotator set. <b>Local</b> models need Ollama at
+            <code>localhost:11434</code>. <b>Cloud</b> &#9729; models run on the group
+            server (<code>OLLAMA_CLOUD_URL</code>, no VPN) &mdash; needs <code>OLLAMA_CLOUD_API_KEY</code> in <code>.env</code>.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Phase-2 — align + detect conflicts</legend>
+          <label title="The stub is a keyword heuristic: its labels are not arbitrated and must not be diagnosed on"><input type="checkbox" id="p2-skip-layer2"> Skip Layer-2 (deterministic stub instead of the arbitrator — for plumbing tests only)</label>
+          <div class="model-row"><span class="ml">Layer-2 model</span>
+            <select id="p2-layer2-model"></select>
+          </div>
+          <label>Align threshold <input type="number" id="p2-align-threshold" value="0.78" step="0.01" min="0" max="1" style="width:60px"></label>
+          <label>Annotation guideline <select id="p2-guideline" title="Which guideline version to align: reads data/facts__<version>/, writes conflicts/<doc>__<version>.json"></select></label>
+          <label>Conflict detect guideline <select id="p2-arbitrate-version" title="Which arbitrate_*.md prompt to use for Layer-2 conflict classification"></select></label>
+          <div class="row">
+            <button id="run-phase2-btn">Run Phase-2</button>
+            <span id="p2-status"></span>
+          </div>
+          <p class="ollama-hint">Runs over every doc with &ge; 2 annotators on disk, minus the locked
+            eval set. Layer-2 defaults to the arbitrator of record, <code>{{ record.layer2 }}</code>.</p>
+        </fieldset>
+      </div>
+    </div>
+
+    <div class="tab-pane" data-tab="experiment">
+      <div class="exp-grid">
+        <fieldset id="exp-form">
+          <legend>Closed-loop experiment — Phase-1 → Phase-2 → compare, one click</legend>
+          <label>Guideline <select id="exp-guideline"></select>
+            <button id="exp-edit-guideline" class="tool-btn" title="Open this version in the guideline editor">edit…</button>
+          </label>
+          <label>Models <input type="text" id="exp-models" value="{{ record.annotators | join(',') }}" size="34"></label>
+          <label>Docs <input type="text" id="exp-docs" placeholder="blank = every doc that has a baseline Phase-2 result" size="42"></label>
+          <label><input type="checkbox" id="exp-skip-extract"> Skip extraction (re-use facts already on disk for this version)</label>
+          <label title="The stub is a keyword heuristic: its labels are not arbitrated and must not be diagnosed on"><input type="checkbox" id="exp-skip-layer2"> Stub Layer-2 (instead of the arbitrator of record, {{ record.layer2 }})</label>
+          <label>Align thr <input type="number" id="exp-align" value="0.78" step="0.01" min="0" max="1" style="width:62px"></label>
+          <div class="row">
+            <button id="exp-run">Run experiment</button>
+            <button id="exp-compare" disabled>Compare vs v1</button>
+            <span id="exp-status"></span>
+          </div>
+          <p class="hint">Non-v1 runs write to <code>data/facts__&lt;version&gt;/</code> and
+            <code>data/conflicts/&lt;doc&gt;__&lt;version&gt;.json</code> — the v1 baseline is never
+            overwritten. When the job finishes, the v1↔vX comparison opens automatically;
+            use the version dropdown in the top bar to inspect the vX graph and facts.</p>
+        </fieldset>
+        <fieldset id="exp-evidence">
+          <legend>Guideline evidence — which rules cause conflicts (from your reviews)</legend>
+          <div id="evidence-body"><p class="hint">No reviews yet. Use the <b>Review</b> tab to attribute
+            conflicts to guideline rules; the tally appears here to guide the v2 revision.</p></div>
+          <div class="row"><button id="evidence-refresh" class="tool-btn">Refresh</button></div>
+        </fieldset>
+      </div>
+    </div>
+
+    <div class="tab-pane" data-tab="review">
+      <div id="review-root">
+        <div id="review-list-col">
+          <div id="review-controls">
+            <select id="review-label-filter" title="Filter by conflict label">
+              <option value="">all labels</option>
+              <option value="contradiction">contradiction</option>
+              <option value="granularity">granularity</option>
+              <option value="redundancy">redundancy</option>
+              <option value="orphan">orphans (unmatched)</option>
+            </select>
+            <label><input type="checkbox" id="review-unreviewed-only" checked> unreviewed only</label>
+            <span id="review-progress"></span>
+          </div>
+          <div id="review-list"></div>
+        </div>
+        <div id="review-detail">
+          <p class="hint">Pick a pair on the left. Attribute the disagreement to the guideline rule(s)
+          that under-specify it — the tally feeds the Experiment tab's evidence panel for writing v2.</p>
+        </div>
+      </div>
+    </div>
+
+      <div id="job-status"></div>
+    </div>
+
+
+
+    <div class="tab-pane" data-tab="run-matrix">
+      <p class="hint">Pick (doc &times; model &times; guideline) cells. Submit enqueues one job per cell.
+        Cell tooltips show the last run's triple count. Locked eval documents cannot be picked, and a
+        cell of a run of record (the v1 baseline) is refused by the server. Phase-2 uses the Runs tab's
+        Layer-2 settings.</p>
+      <div class="row rm-controls">
+        <span class="ml">Phase</span>
+        <label class="rm-phase-label"><input type="radio" name="rm-phase" value="phase1" checked> Phase-1 (extract)</label>
+        <label class="rm-phase-label"><input type="radio" name="rm-phase" value="phase2"> Phase-2 (align)</label>
+        <span class="rm-sep"></span>
+        <span class="ml">Models</span>
+        <span class="model-checks rm-model-checks">
+          {% for m in record.annotators %}
+          <label title="{{ m }}"><input type="checkbox" value="{{ m }}" checked> {{ m | replace('cloud:', '') | replace('hf.co/unsloth/', '') }}</label>
+          {% endfor %}
+        </span>
+        <button id="rm-add-combo">Refresh columns</button>
+        <button id="rm-submit">Submit selected cells</button>
+        <span id="rm-status"></span>
+      </div>
+      <div id="rm-matrix-wrap"></div>
+    </div>
+    <div class="tab-pane" data-tab="neo4j">
+      <p class="hint">Custom conflict detection over the reified KG in Neo4j (the proposal's
+        "interactive graph constraints" — a guideline rule expressed as a graph pattern).
+        Export the current doc, pick or write a constraint, then Run. <b>report</b> is
+        read-only; <b>materialize</b> MERGEs <code>:CONFLICTS_WITH</code> edges into the graph.</p>
+      <div class="row">
+        <span id="neo4j-status" class="hint">checking Neo4j…</span>
+        <button id="neo4j-refresh" class="tool-btn">Refresh</button>
+        <button id="neo4j-export" title="Wipe + reload the current doc's reified KG into Neo4j">Export current doc → Neo4j</button>
+        <span id="neo4j-export-status" class="hint"></span>
+      </div>
+      <div class="row">
+        <label>Constraint <select id="neo4j-constraint-select"></select></label>
+        <label>Params <input type="text" id="neo4j-params" size="20" value="{}"></label>
+        <label>Mode
+          <select id="neo4j-mode">
+            <option value="report" selected>report (read-only)</option>
+            <option value="materialize">materialize (write)</option>
+          </select>
+        </label>
+        <button id="neo4j-run">Run constraint</button>
+        <span id="neo4j-run-status" class="hint"></span>
+      </div>
+      <small id="neo4j-desc" class="hint"></small>
+      <textarea id="neo4j-cypher" rows="7" spellcheck="false" placeholder="MATCH ... RETURN ..."></textarea>
+      <div id="neo4j-results"></div>
+    </div>
+
+    <div class="tab-pane" data-tab="annotation">
+      <div class="annotation-split">
+        <div class="annotation-half">
+          <p class="annotation-half-title">Schema versions</p>
+          <p class="hint">I/O contract embedded in every extraction prompt (schema_*.md). v1 is protected.</p>
+          <div class="row">
+            <label>Version <select id="sv-select"></select></label>
+            <label>Save as <input type="text" id="sv-new-version" placeholder="v2" size="10"></label>
+            <button id="sv-load">Load</button>
+            <button id="sv-save">Save</button>
+            <button id="sv-delete" class="danger" title="Delete this version (v1 is protected)">Delete</button>
+            <span id="sv-status"></span>
+          </div>
+          <textarea id="sv-text" rows="14" spellcheck="false" placeholder="Pick a version and click Load."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane" data-tab="change-log">
+      <p class="hint">The draft and its revision record, side by side — the same surface
+        the control console (<code>scripts/serve_control_console.py</code>) gives the
+        no-feedback control, so the two arms leave the same kind of record. Writing to
+        <b id="gl-target">extract_v2.md</b>. The schema frame is
+        <button class="tab-link" data-goto-tab="annotation">held fixed elsewhere</button>:
+        a guideline revision must never change the output contract.</p>
+      <div class="annotation-split gl-split">
+        <div class="annotation-half">
+          <p class="annotation-half-title">Annotation guidelines</p>
+          <p class="hint">Extraction rules injected as the &lt;&lt;GUIDELINE&gt;&gt; slot (extract_*.md). v1 is protected.</p>
+          <div class="row">
+            <label>Version <select id="gm-select"></select></label>
+            <label>Save as <input type="text" id="gm-new-version" placeholder="v2" size="10"></label>
+            <button id="gm-load">Load</button>
+            <button id="gm-save">Save</button>
+            <button id="gm-delete" class="danger" title="Delete this version (v1 is protected)">Delete</button>
+            <button id="gm-freeze" title="Commit this version: writes extract_&lt;v&gt;.lock.json with its sha256 and the change log's digest, and refuses every later edit. This is the artefact RQ2 reports.">Freeze</button>
+            <span id="gm-status"></span>
+          </div>
+          <div id="gm-lock" class="gm-lock hidden"></div>
+          <div class="row" style="display:none">
+          </div>
+          <textarea id="gm-text" rows="22" spellcheck="false" placeholder="Pick a version and click Load."></textarea>
+        </div>
+        <div class="annotation-half">
+        <div id="gl-panel" class="gl">
+          <div class="row gl-head">
+            <button id="gl-toggle" class="tool-btn" title="collapse / expand the change log">&#9662;</button>
+            <b>Change log</b>
+            <span class="hint" id="gl-sub">why this edit, citing what the interface showed</span>
+            <span class="gl-spacer"></span>
+            <button id="gl-history" class="tool-btn" title="Checkpoints of this version and what each save changed">History</button>
+          </div>
+          <div id="gl-body">
+            <div class="gl-cites" id="gl-cites"></div>
+            <div class="row">
+              <select id="gl-op">
+                <option value="modify">modify rule</option>
+                <option value="delete">delete rule</option>
+                <option value="new">new rule</option>
+              </select>
+              <input type="text" id="gl-rule" placeholder="rule id or short name, e.g. R7">
+              <button id="gl-log" title="Saves the draft, checkpoints it, and files this reason with the exact lines it changed">Save &amp; log this change</button>
+              <span class="hint" id="gl-log-status"></span>
+            </div>
+            <textarea id="gl-why" rows="2" spellcheck="false"
+              placeholder="Why this change? Which conflict made it visible, and what does the rule now say?"></textarea>
+            <div id="gl-shots" class="gl-shots" tabindex="0"
+              title="Paste a screenshot (Ctrl+V), drop an image here, or click to pick a file">
+              <span class="hint">Screenshot of what you saw — <b>paste</b> (Ctrl+V),
+                drop an image, or <button id="gl-shot-pick" class="tool-btn">choose a file</button>.
+                Kept with this version; PNG / JPEG / GIF / WebP, up to 8&nbsp;MB.</span>
+              <span class="hint" id="gl-shot-status"></span>
+              <div id="gl-shot-list" class="gl-shot-list"></div>
+              <input type="file" id="gl-shot-file" accept="image/*" multiple style="display:none">
+            </div>
+            <div id="gl-entries" class="gl-entries"></div>
+          </div>
+          <div id="gl-hist" class="gl-hist" style="display:none">
+            <div class="row">
+              <b>History</b><span class="hint" id="gl-hist-sub"></span>
+              <span class="gl-spacer"></span>
+              <button id="gl-prune" class="tool-btn" style="display:none"
+                title="Collapse a burst of saves to the state it ended in">Clean up</button>
+              <button id="gl-hist-close" class="tool-btn">Close</button>
+            </div>
+            <div id="gl-hist-list" class="gl-entries"></div>
+            <div id="gl-hist-detail" style="display:none">
+              <div class="row">
+                <span class="hint" id="gl-hist-which"></span>
+                <span class="gl-spacer"></span>
+                <button id="gl-hist-vs" class="tool-btn">vs current draft</button>
+                <button id="gl-hist-restore" class="tool-btn"
+                  title="Load this checkpoint into the editor above (nothing is written until you press Save)">Restore into draft</button>
+                <button id="gl-hist-back" class="tool-btn">Back</button>
+              </div>
+              <div id="gl-hist-notes" class="gl-hist-notes"></div>
+              <pre id="gl-hist-diff" class="gl-diff"></pre>
+            </div>
+          </div>
+          <div id="gl-lightbox" class="gl-lightbox" style="display:none">
+            <div class="gl-lightbox-inner">
+              <div class="row">
+                <span class="hint" id="gl-lightbox-cap"></span>
+                <span class="gl-spacer"></span>
+                <button id="gl-lightbox-close" class="tool-btn">Close</button>
+              </div>
+              <img id="gl-lightbox-img" alt="">
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane" data-tab="arbitrate-manager">
+      <p class="hint">Conflict-detection prompt used by Phase-2 Layer-2 (arbitrate_*.md). Edit the rules, save as a new version, then select it in the Phase-2 panel. v1 is protected.</p>
+      <div class="row">
+        <label>Version <select id="am-select"></select></label>
+        <label>Save as <input type="text" id="am-new-version" placeholder="v2" size="10"></label>
+        <button id="am-load">Load</button>
+        <button id="am-save">Save</button>
+        <button id="am-delete" class="danger" title="Delete this version (v1 is protected)">Delete</button>
+        <span id="am-status"></span>
+      </div>
+      <textarea id="am-text" rows="16" spellcheck="false" placeholder="Pick a version and click Load."></textarea>
+    </div>
+
+
+  </footer>
+
+  <!-- The frozen annotator set and the Layer-2 arbitrator of record, from
+       scripts/run_phase2.py via ui/app.py:_of_record — one owner, so the
+       defaults below cannot drift back to the retired 4B models. -->
+  <script>window.__vaRecord = {{ record | tojson }};</script>
+  <script src="/static/variant_shim.js"></script>
+  <script src="/static/app.js"></script>
+  <script src="/static/analysis.js"></script>
+  <script src="/static/workflow.js"></script>
+  <script src="/static/neo4j.js"></script>
+  <script src="/static/groups.js"></script>
+  <script src="/static/guideline_log.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+.venv/
+.git/
+.idea/
+__pycache__/
+*.pyc
+.pytest_cache/
+pytest-cache-files-*/
+data/neo4j/
+data/hf_cache/
+data/raw_html/
+*.log
+.env

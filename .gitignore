@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Data — fetched HTML and parsed JSON are reproducible from the CELEX list
+data/raw_html/
+data/parsed/
+data/hf_cache
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+.env
+data/neo4j/
+
+# Claude Code session state (worktrees are separate checkouts)
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+
+# LaTeX build intermediates (main.pdf is kept)
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.toc
+*.synctex.gz
+thesis/main.log
+doc/methodology_v2.log
+
+# Editor backups
+*.bak
+
+# Over GitHub's 100 MB file limit; kept locally
+runs/ollama_20260910.log
