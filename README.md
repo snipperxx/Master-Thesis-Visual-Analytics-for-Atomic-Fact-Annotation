@@ -3,7 +3,7 @@
 **Why do LLM annotators disagree, and can that disagreement be used to write a
 better annotation guideline?**
 
-Master's thesis · University of Konstanz, in cooperation with FIZ Karlsruhe · 2026 (in progress)
+Master's thesis · University of Konstanz · 2026 (in progress)
 
 ![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3-000000?logo=flask&logoColor=white)
